@@ -2,14 +2,12 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/karim-w/stdlib/httpclient"
 )
 
 func main() {
@@ -39,7 +37,7 @@ type model struct {
 }
 
 func initialModel() model {
-	//url box
+	// url box
 	ta := textarea.New()
 	ta.Placeholder = "Enter URL here...."
 	// ta.Focus()
@@ -47,7 +45,7 @@ func initialModel() model {
 	// ta.Prompt = "┃ "
 	ta.CharLimit = 280
 
-	ta.SetWidth(50)
+	ta.SetWidth(100)
 	ta.SetHeight(1)
 
 	// Remove cursor line styling
@@ -103,28 +101,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		urlCmd    tea.Cmd
 		inputCmd  tea.Cmd
 		outputCmd tea.Cmd
-		methodCmd tea.Cmd
 	)
-	// m.textarea, tiCmd = m.textarea.Update(msg)
-	// m.viewport, vpCmd = m.viewport.Update(msg)
+
 	switch m.selectedWindow {
 	case 1:
 		m.urlInput, urlCmd = m.urlInput.Update(msg)
 	case 2:
 		m.body, inputCmd = m.body.Update(msg)
 	case 0:
-		m.methodBox, methodCmd = m.methodBox.Update(msg)
+		m.methodBox, _ = m.methodBox.Update(msg)
 	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC:
-			fmt.Println("Exiting...")
-			fmt.Println(urlCmd)
-			fmt.Println(inputCmd)
-			fmt.Println(outputCmd)
-			fmt.Println(methodCmd)
 			return m, tea.Quit
 		case tea.KeyTab:
 			m.selectedWindow = (m.selectedWindow + 1) % 4
@@ -152,23 +143,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.response.Blur()
 			}
 		case tea.KeyCtrlR:
-			client := &http.Client{}
-			var data = strings.NewReader(m.body.Value())
-			req, err := http.NewRequest(m.methodBox.Value(), m.body.Value(), data)
-			if err != nil {
-				log.Fatal(err)
+			req := httpclient.Req(m.urlInput.Value())
+			var res httpclient.HTTPResponse
+			switch m.methodBox.Value() {
+			case "GET":
+				res = req.Get()
+			case "POST":
+				res = req.AddBodyRaw([]byte(m.body.Value())).Post()
+			case "PATCH":
+				res = req.AddBodyRaw([]byte(m.body.Value())).Patch()
+			case "PUT":
+				res = req.AddBodyRaw([]byte(m.body.Value())).Put()
+			case "DELETE":
+				res = req.Del()
 			}
-			req.Header.Set("accept", "application/json")
-			resp, err := client.Do(req)
-			if err != nil {
-				log.Fatal(err)
+			if !res.IsSuccess() {
+				m.response.SetValue(res.CatchError().Error())
+			} else {
+				m.response.SetValue(string(res.GetBody()))
 			}
-			defer resp.Body.Close()
-			bodyText, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				log.Fatal(err)
-			}
-			m.response.SetValue(string(bodyText))
 		}
 
 	// We handle errors just like any other message
@@ -182,7 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	return fmt.Sprintf(
-		"URL:\t%s\t%s\nBody:\n%s\nResponse:\n%s",
+		"%s%s\nBody:\n%s\nResponse:\n%s",
 		m.methodBox.View(),
 		m.urlInput.View(),
 		m.body.View(),
